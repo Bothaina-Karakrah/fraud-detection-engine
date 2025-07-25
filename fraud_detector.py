@@ -1,9 +1,12 @@
-# advanced_fraud_detector.py
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 from dataclasses import dataclass
 import logging
+import pandas as pd
 from holidays import country_holidays
+from sqlalchemy import func, and_, desc, Integer
+from models import Transaction
+from database import SessionLocal
 
 @dataclass
 class FraudRule:
@@ -18,23 +21,14 @@ class AdvancedFraudDetector:
             'amount_based': [
                 self.high_amount_rule,
                 self.round_amount_rule,
-                self.amount_progression_rule
             ],
             'velocity_based': [
                 self.transaction_velocity_rule,
-                self.amount_velocity_rule,
                 self.merchant_velocity_rule
             ],
             'behavioral': [
                 self.time_pattern_rule,
                 self.location_anomaly_rule,
-                self.merchant_category_rule,
-                self.device_fingerprint_rule
-            ],
-            'network': [
-                self.ip_reputation_rule,
-                self.geolocation_mismatch_rule,
-                self.proxy_detection_rule
             ]
         }
 
@@ -63,7 +57,6 @@ class AdvancedFraudDetector:
         try:
             # Get user behavioral profile
             user_profile = await self.get_user_profile(transaction['user_id'])
-
             # Run all fraud detection rules
             for category, rule_list in self.rules.items():
                 for rule_func in rule_list:
@@ -73,15 +66,12 @@ class AdvancedFraudDetector:
                         analysis_result['triggered_rules'].append(rule_result)
                         analysis_result['fraud_score'] += rule_result['weight']
                         analysis_result['rule_details'][rule_result['rule_name']] = rule_result
-
             # Normalize fraud score
             analysis_result['fraud_score'] = min(analysis_result['fraud_score'], 1.0)
-
             # Calculate confidence based on rule agreement
             analysis_result['confidence'] = self.calculate_confidence(
                 analysis_result['triggered_rules']
             )
-
             # Determine risk level and recommendation
             analysis_result['risk_level'] = self.calculate_risk_level(
                 analysis_result['fraud_score']
@@ -91,11 +81,9 @@ class AdvancedFraudDetector:
                 analysis_result['confidence']
             )
             analysis_result['is_fraud'] = analysis_result['fraud_score'] > 0.5
-
             # Calculate processing time
             processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
             analysis_result['processing_time_ms'] = int(processing_time)
-
             # Log for monitoring
             logging.info(
                 f"Fraud analysis completed: "
@@ -103,7 +91,6 @@ class AdvancedFraudDetector:
                 f"Rules={len(analysis_result['triggered_rules'])}, "
                 f"Time={processing_time:.1f}ms"
             )
-
             return analysis_result
 
         except Exception as e:
@@ -112,8 +99,7 @@ class AdvancedFraudDetector:
             return analysis_result
 
     # ---------- RULE FUNCTIONS ----------
-    @staticmethod
-    async def high_amount_rule(transaction: Dict, user_profile: Dict) -> Dict:
+    async def high_amount_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
         """Detect transactions with unusually high amounts"""
         amount = transaction['amount']
         user_avg = user_profile.get('avg_transaction_amount', 100)
@@ -146,11 +132,35 @@ class AdvancedFraudDetector:
             'severity': 'HIGH' if risk_score > 0.5 else 'MEDIUM' if risk_score > 0.3 else 'LOW'
         }
 
+    
     async def round_amount_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
+        """Detect suspiciously round amounts"""
+        amount = transaction['amount']
 
-    async def amount_progression_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
+        risk_factors = []
+        risk_score = 0.0
+
+        # Check for round numbers
+        if amount % 100 == 0 and amount >= 500:
+            risk_score += 0.3
+            risk_factors.append(f"Round hundred amount: ${amount}")
+        elif amount % 50 == 0 and amount >= 200:
+            risk_score += 0.2
+            risk_factors.append(f"Round fifty amount: ${amount}")
+
+        # Check for patterns like 9.99 or similar
+        if str(amount).endswith('.99') and amount > 100:
+            risk_score += 0.2
+            risk_factors.append(f"Suspicious decimal pattern: ${amount}")
+
+        return {
+            'rule_name': 'Round Amount Detection',
+            'triggered': len(risk_factors) > 0,
+            'weight': min(risk_score, 0.4),
+            'category': 'amount_based',
+            'details': risk_factors,
+            'severity': 'MEDIUM' if risk_score > 0.3 else 'LOW'
+        }
 
     async def transaction_velocity_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
         """
@@ -195,14 +205,53 @@ class AdvancedFraudDetector:
             'severity': 'CRITICAL' if total_risk > 0.6 else 'HIGH' if total_risk > 0.4 else 'MEDIUM'
         }
 
-    async def amount_velocity_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        """
-        how much money was spent recently — and how that compares to the user’s usual spending behavior.
-        """
-        pass
-
     async def merchant_velocity_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
+        """Detect multiple transactions to same merchant in short time"""
+        user_id = transaction['user_id']
+        merchant_id = transaction.get('merchant_id')
+
+        if not merchant_id:
+            return {
+                'rule_name': 'Merchant Velocity',
+                'triggered': False,
+                'weight': 0.0,
+                'category': 'velocity_based',
+                'details': [],
+                'severity': 'LOW'
+            }
+
+        # Check transactions to same merchant in last hour
+        current_time = datetime.fromisoformat(transaction['timestamp'].replace('Z', '+00:00'))
+        hour_ago = current_time - timedelta(hours=1)
+
+        merchant_transactions = await self.get_merchant_transactions_in_window(
+            user_id, merchant_id, hour_ago, current_time
+        )
+
+        risk_factors = []
+        risk_score = 0.0
+
+        if len(merchant_transactions) >= 3:
+            risk_score += 0.4
+            risk_factors.append(f"{len(merchant_transactions)} transactions to same merchant in 1 hour")
+
+        # Check for rapid-fire transactions (within 5 minutes)
+        five_minutes_ago = current_time - timedelta(minutes=5)
+        recent_merchant_transactions = [t for t in merchant_transactions
+                                        if t['timestamp'] >= five_minutes_ago]
+
+        if len(recent_merchant_transactions) >= 2:
+            risk_score += 0.3
+            risk_factors.append(f"{len(recent_merchant_transactions)} transactions to same merchant in 5 minutes")
+
+        return {
+            'rule_name': 'Merchant Velocity',
+            'triggered': len(risk_factors) > 0,
+            'weight': min(risk_score, 0.5),
+            'category': 'velocity_based',
+            'details': risk_factors,
+            'severity': 'HIGH' if risk_score > 0.4 else 'MEDIUM'
+        }
 
     async def time_pattern_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
         """Detect transactions at unusual times"""
@@ -240,8 +289,8 @@ class AdvancedFraudDetector:
             'severity': 'MEDIUM' if risk_score > 0.3 else 'LOW'
         }
 
-    @staticmethod
-    async def location_anomaly_rule(transaction: Dict, user_profile: Dict) -> Dict:
+    
+    async def location_anomaly_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
         """Detect transactions from unusual locations"""
         transaction_country = transaction.get('location_country', 'Unknown')
         transaction_city = transaction.get('location_city', 'Unknown')
@@ -276,42 +325,295 @@ class AdvancedFraudDetector:
             'severity': 'CRITICAL' if risk_score > 0.7 else 'HIGH' if risk_score > 0.4 else 'MEDIUM'
         }
 
-    async def merchant_category_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
-
-    async def device_fingerprint_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
-
-    async def ip_reputation_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
-
-    async def geolocation_mismatch_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
-
-    async def proxy_detection_rule(self, transaction: Dict, user_profile: Dict) -> Dict:
-        pass
-
     # ---------- PROFILE & UTILITIES ----------
     async def get_user_profile(self, user_id: str) -> Dict:
-        pass
+        """Get or create user behavioral profile"""
+        if user_id in self.user_profiles:
+            return self.user_profiles[user_id]
+
+        # Simulate database query for user transaction history
+        profile = await self.build_user_profile(user_id)
+        self.user_profiles[user_id] = profile
+        return profile
 
     async def build_user_profile(self, user_id: str) -> Dict:
-        pass
+        """Build comprehensive user behavioral profile"""
+        # Simulate querying user's transaction history
+        user_transactions = await self.get_user_transaction_history(user_id)
 
-    async def get_user_transaction_history(self, user_id: str) -> List[Dict]:
-        pass
+        if not user_transactions:
+            return {
+                'transaction_count': 0,
+                'avg_transaction_amount': 0,
+                'max_transaction_amount': 0,
+                'common_hours': [],
+                'common_days': [],
+                'common_countries': [],
+                'common_cities': [],
+                'common_categories': [],
+                'risk_score': 0.5  # Neutral for new users
+            }
 
+        df = pd.DataFrame(user_transactions)
+
+        profile = {
+            'transaction_count': len(df),
+            'avg_transaction_amount': df['amount'].mean(),
+            'max_transaction_amount': df['amount'].max(),
+            'std_transaction_amount': df['amount'].std(),
+            'common_hours': df['hour'].mode().tolist()[:3],
+            'common_days': df['day_of_week'].mode().tolist()[:3],
+            'common_countries': df['country'].value_counts().head(3).index.tolist(),
+            'common_cities': df['city'].value_counts().head(5).index.tolist(),
+            'common_categories': df['category'].value_counts().head(5).index.tolist(),
+            'last_location': (df.iloc[-1]['country'], df.iloc[-1]['city']),
+            'last_transaction_time': df.iloc[-1]['timestamp'],
+            'risk_score': self.calculate_user_risk_score(df)
+        }
+
+        return profile
+
+    # ---------- DATABASE FETCHING ----------
+    async def get_user_transaction_history(self, user_id: str, limit: int = 100) -> List[Dict]:
+        """
+        Fetch user transaction history from database
+        """
+        db = SessionLocal()
+        try:
+            # Query last 100 transactions for the user
+            transactions = db.query(Transaction).filter(Transaction.user_id == user_id) \
+                .order_by(desc(Transaction.timestamp)).limit(limit).all()
+
+            # Convert to list of dictionaries for pandas processing
+            transaction_list = []
+            for txn in transactions:
+                transaction_list.append({
+                    'transaction_id': txn.id,
+                    'user_id': txn.user_id,
+                    'amount': txn.amount,
+                    'timestamp': txn.timestamp,
+                    'hour': txn.timestamp.hour,
+                    'day_of_week': txn.timestamp.weekday(),
+                    'country': self._extract_country_from_location(txn.location),
+                    'city': self._extract_city_from_location(txn.location),
+                    'category': txn.merchant_category,
+                    'transaction_type': txn.transaction_type,
+                    'card_present': txn.card_present
+                })
+
+            return transaction_list
+
+        finally:
+            db.close()
+
+    
     async def get_transaction_count_in_window(self, user_id: str, start: datetime, end: datetime) -> int:
-        pass
+        """
+        Count transactions for a user within a time window
+        """
+        db = SessionLocal()
+        try:
+            count = db.query(func.count(Transaction.id)) \
+                .filter(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.timestamp >= start,
+                    Transaction.timestamp <= end
+                )
+            ) \
+                .scalar()
 
-    async def get_merchant_profile(self, merchant_id: str) -> Dict:
-        pass
+            return count or 0
 
+        finally:
+            db.close()
+
+    
+    async def get_merchant_transactions_in_window(self, user_id: str, merchant_category: str,
+                                                  start: datetime, end: datetime) -> List[Dict]:
+        """
+        Get all transactions for a user in a specific merchant category within time window
+        Note: Using merchant_category as proxy for merchant_id since that's what's in your schema
+        """
+        db = SessionLocal()
+        try:
+            transactions = db.query(Transaction) \
+                .filter(
+                and_(
+                    Transaction.user_id == user_id,
+                    Transaction.merchant_category == merchant_category,
+                    Transaction.timestamp >= start,
+                    Transaction.timestamp <= end
+                )
+            ) \
+                .order_by(Transaction.timestamp) \
+                .all()
+
+            transaction_list = []
+            for txn in transactions:
+                transaction_list.append({
+                    'transaction_id': txn.id,
+                    'user_id': txn.user_id,
+                    'merchant_category': txn.merchant_category,
+                    'timestamp': txn.timestamp,
+                    'amount': txn.amount
+                })
+
+            return transaction_list
+
+        finally:
+            db.close()
+
+    async def get_merchant_profile(self, merchant_category: str) -> Dict:
+        """
+        Get merchant category statistics and profile
+        Since your schema uses merchant_category instead of merchant_id
+        """
+        if merchant_category in self.merchant_profiles:
+            return self.merchant_profiles[merchant_category]
+
+        db = SessionLocal()
+        try:
+            # Get statistics for this merchant category
+            stats = db.query(
+                func.count(Transaction.id).label('transaction_count'),
+                func.avg(Transaction.amount).label('avg_amount'),
+                func.max(Transaction.amount).label('max_amount'),
+                func.min(Transaction.amount).label('min_amount'),
+                func.stddev(Transaction.amount).label('std_amount'),
+                func.sum(Transaction.is_fraud.cast(Integer)).label('fraud_count')
+            ).filter(Transaction.merchant_category == merchant_category).first()
+
+            if stats.transaction_count == 0:
+                # No transactions for this merchant category
+                profile = {
+                    'merchant_category': merchant_category,
+                    'avg_transaction_amount': 0,
+                    'transaction_count': 0,
+                    'fraud_rate': 0.0,
+                    'risk_category': 'UNKNOWN',
+                    'std_amount': 0
+                }
+            else:
+                fraud_rate = (stats.fraud_count or 0) / stats.transaction_count
+
+                # Determine risk category based on fraud rate
+                if fraud_rate > 0.05:  # >5%
+                    risk_category = 'HIGH'
+                elif fraud_rate > 0.02:  # >2%
+                    risk_category = 'MEDIUM'
+                else:
+                    risk_category = 'LOW'
+
+                profile = {
+                    'merchant_category': merchant_category,
+                    'avg_transaction_amount': float(stats.avg_amount or 0),
+                    'max_transaction_amount': float(stats.max_amount or 0),
+                    'min_transaction_amount': float(stats.min_amount or 0),
+                    'std_transaction_amount': float(stats.std_amount or 0),
+                    'transaction_count': stats.transaction_count,
+                    'fraud_count': stats.fraud_count or 0,
+                    'fraud_rate': fraud_rate,
+                    'risk_category': risk_category
+                }
+
+            self.merchant_profiles[merchant_category] = profile
+            return profile
+
+        finally:
+            db.close()
+
+    
     def calculate_user_risk_score(self, df) -> float:
-        pass
+        """
+        Calculate overall user risk score based on transaction history DataFrame
+        """
+        if df.empty:
+            return 0.5  # Neutral for no history
 
-    @staticmethod
-    def calculate_confidence(triggered_rules: List[Dict]) -> float:
+        risk_factors = []
+
+        # Amount variance (high variance = higher risk)
+        if len(df) > 1:
+            amount_std = df['amount'].std()
+            amount_mean = df['amount'].mean()
+            if amount_mean > 0:
+                cv = amount_std / amount_mean  # Coefficient of variation
+                if cv > 2.0:  # Very high variance
+                    risk_factors.append(0.3)
+                elif cv > 1.0:
+                    risk_factors.append(0.1)
+
+        # Time pattern irregularity
+        hour_distribution = df['hour'].value_counts()
+        unique_hours = len(hour_distribution)
+        if unique_hours > 15:  # Active at many different hours (unusual)
+            risk_factors.append(0.2)
+        elif unique_hours < 3 and len(df) > 10:  # Very consistent timing (also unusual)
+            risk_factors.append(0.1)
+
+        # Geographic diversity
+        unique_countries = df['country'].nunique()
+        if unique_countries > 5:
+            risk_factors.append(0.3)
+        elif unique_countries > 3:
+            risk_factors.append(0.1)
+
+        # Transaction frequency
+        if len(df) > 1:
+            time_span = (df['timestamp'].max() - df['timestamp'].min()).total_seconds() / 86400  # days
+            if time_span > 0:
+                transactions_per_day = len(df) / time_span
+                if transactions_per_day > 10:  # Very high frequency
+                    risk_factors.append(0.4)
+                elif transactions_per_day > 5:
+                    risk_factors.append(0.2)
+
+        # Card not present transactions (higher risk)
+        if 'card_present' in df.columns:
+            cnp_ratio = (~df['card_present']).sum() / len(df)
+            if cnp_ratio > 0.8:  # >80% card not present
+                risk_factors.append(0.3)
+            elif cnp_ratio > 0.5:  # >50% card not present
+                risk_factors.append(0.1)
+
+        # Calculate final risk score
+        base_risk = 0.2  # Base risk for all users
+        additional_risk = sum(risk_factors)
+
+        return min(base_risk + additional_risk, 1.0)
+
+    
+    def _extract_country_from_location(self, location: str) -> str:
+        """
+        Extract country from location string
+        Assumes format like "New York, NY, US" or customize based on your format
+        """
+        if not location:
+            return 'Unknown'
+
+        parts = location.split(',')
+        if len(parts) >= 3:
+            return parts[-1].strip()  # Last part is usually country
+        return 'Unknown'
+
+    
+    def _extract_city_from_location(self, location: str) -> str:
+        """
+        Extract city from location string
+        """
+        if not location:
+            return 'Unknown'
+
+        parts = location.split(',')
+        if len(parts) >= 1:
+            return parts[0].strip()  # First part is usually city
+        return 'Unknown'
+
+    # ---------- RESULTS FUNCTIONS ----------
+
+    
+    def calculate_confidence(self, triggered_rules: List[Dict]) -> float:
         """Calculate confidence based on rule agreement and weights"""
         if not triggered_rules:
             return 1.0  # High confidence in legitimate transactions
@@ -324,8 +626,9 @@ class AdvancedFraudDetector:
         weight_factor = min(float(total_weight), 1.0)
 
         return (agreement_factor + weight_factor) / 2
-    @staticmethod
-    def calculate_risk_level(fraud_score: float) -> str:
+
+    
+    def calculate_risk_level(self, fraud_score: float) -> str:
         """Convert fraud score to risk level"""
         if fraud_score >= 0.8:
             return 'CRITICAL'
@@ -333,10 +636,10 @@ class AdvancedFraudDetector:
             return 'HIGH'
         elif fraud_score >= 0.3:
             return 'MEDIUM'
-        else:
-            return 'LOW'
-    @staticmethod
-    def get_recommendation(fraud_score: float, confidence: float) -> str:
+        return 'LOW'
+
+    
+    def get_recommendation(self, fraud_score: float, confidence: float) -> str:
         """Get action recommendation based on score and confidence"""
         if fraud_score >= 0.8 and confidence >= 0.7:
             return 'BLOCK'
@@ -346,7 +649,7 @@ class AdvancedFraudDetector:
             return 'MONITOR'
         else:
             return 'APPROVE'
-    @staticmethod
-    def is_holiday(transaction_date, country='US'):
+    
+    def is_holiday(self, transaction_date, country='US'):
         holidays = country_holidays(country)
         return transaction_date in holidays
