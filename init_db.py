@@ -1,7 +1,7 @@
 """
 Ran it using "python init_db.py"
 Check the database using "psql -U bothainakarakrah -d fraud_db"
-then "\dt"
+then "dt"
 """
 import asyncio
 import asyncpg

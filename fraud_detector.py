@@ -7,6 +7,7 @@ from holidays import country_holidays
 from sqlalchemy import func, and_, desc, Integer
 from models import Transaction
 from database import SessionLocal
+from cachetools import TTLCache
 
 @dataclass
 class FraudRule:
@@ -31,9 +32,8 @@ class AdvancedFraudDetector:
                 self.location_anomaly_rule,
             ]
         }
-
-        self.user_profiles = {}
-        self.merchant_profiles = {}
+        self.user_profiles = TTLCache(ttl=600)
+        self.merchant_profiles = TTLCache(ttl=600)
 
     async def analyze_transaction(self, transaction: Dict) -> Dict:
         """
@@ -275,7 +275,7 @@ class AdvancedFraudDetector:
                 risk_factors.append("Weekend transaction for business-hours user")
 
         # Holiday transactions (simulate holiday database)
-        if self.is_holiday(transaction_time.date()):
+        if self.is_holiday(transaction_time.date(), transaction['location_country']):
             if len(user_common_days) > 0:  # Has established pattern
                 risk_score += 0.2
                 risk_factors.append("Holiday transaction")
@@ -611,8 +611,6 @@ class AdvancedFraudDetector:
         return 'Unknown'
 
     # ---------- RESULTS FUNCTIONS ----------
-
-    
     def calculate_confidence(self, triggered_rules: List[Dict]) -> float:
         """Calculate confidence based on rule agreement and weights"""
         if not triggered_rules:
@@ -638,7 +636,6 @@ class AdvancedFraudDetector:
             return 'MEDIUM'
         return 'LOW'
 
-    
     def get_recommendation(self, fraud_score: float, confidence: float) -> str:
         """Get action recommendation based on score and confidence"""
         if fraud_score >= 0.8 and confidence >= 0.7:
