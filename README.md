@@ -84,7 +84,7 @@ python insert_sample_data.py
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
-The API will be available at http://localhost:8000
+The API will be available at http://localhost:8000 <br>
 API documentation: http://localhost:8000/docs
 
 3. Start the Frontend Dashboard
