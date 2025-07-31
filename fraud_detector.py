@@ -32,8 +32,8 @@ class AdvancedFraudDetector:
                 self.location_anomaly_rule,
             ]
         }
-        self.user_profiles = TTLCache(ttl=600)
-        self.merchant_profiles = TTLCache(ttl=600)
+        self.user_profiles = TTLCache(maxsize=1000, ttl=600)
+        self.merchant_profiles = TTLCache(maxsize=1000, ttl=600)
 
     async def analyze_transaction(self, transaction: Dict) -> Dict:
         """

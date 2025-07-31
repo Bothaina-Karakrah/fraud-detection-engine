@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import asyncpg
@@ -6,6 +6,7 @@ import fraud_detector
 from datetime import datetime, timezone
 from typing import List, Optional
 import logging
+import asyncio
 
 from pydantic import BaseModel
 DATABASE_URL = "postgresql://bothainakarakrah@localhost/fraud_db"
@@ -24,10 +25,16 @@ Middleware for performance.
 GZipMiddleware - Compresses responses larger than 1000 bytes.
 CORSMiddleware - Allows access from frontend apps
 """
+allow_origins=[
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173"
+]
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://your-domain.com"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -158,6 +165,20 @@ async def get_dashboard_stats():
     except Exception as e:
         logger.error(f"Dashboard stats failed: {e}")
         return {"error": "Unable to fetch statistics"}
+
+@app.websocket("/ws")
+async def websocket_dashboard(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            stats = await get_dashboard_stats()
+            await websocket.send_json({
+                "type": "dashboard_update",
+                "payload": stats
+            })
+            await asyncio.sleep(10)  # Update every 10 seconds
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
 
 async def store_transaction(transaction_id: str, transaction: TransactionRequest, fraud_result: dict):
     try:
