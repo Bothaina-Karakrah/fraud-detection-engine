@@ -65,9 +65,6 @@ DATABASE_URL=postgresql+asyncpg://username:password@localhost:5432/fraud_detecti
 API_HOST=localhost
 API_PORT=8000
 DEBUG=True
-
-# Security (optional)
-SECRET_KEY=your-secret-key-here
 ```
 
 You can use `init_db.py` and `insert_sample_data.py` to set up tables and generate fake data.
@@ -120,6 +117,6 @@ npm run dev
 
 ## 👤 Author
 
-Bothaina Karakrah – [LinkedIn](https://github.com/Bothaina-Karakrah)
+Bothaina Karakrah – [LinkedIn]([https://github.com/Bothaina-Karakrah](https://www.linkedin.com/in/bothaina-karakrah-57458219a/))
 
 License: MIT
