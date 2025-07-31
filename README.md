@@ -2,37 +2,55 @@
 
 A lightweight, real-time fraud detection API built with **FastAPI**, **async SQLAlchemy**, and a rule-based analysis engine. This project simulates financial transactions, detects suspicious activity, and provides fraud insights via a clean API and dashboard interface.
 
-## 🚀 Features
-
-- Asynchronous FastAPI backend
-- Rule-based fraud detection logic.
-- Live transaction analysis with fraud score & recommendation
-- Alerts panel for high-risk activity
-- Stats API for transaction/fraud overview
-- Built-in support for PostgreSQL
-- Realistic fake data generator included
+## Features
+- Asynchronous FastAPI backend for high-performance request handling
+- Rule-based fraud detection logic with customizable risk scoring
+- Real-time transaction analysis with fraud score & recommendation
+- Alerts panel for monitoring high-risk activity
+- Comprehensive stats API for transaction and fraud overview
+- PostgreSQL integration for reliable data persistence
+- Realistic fake data generator for testing and development
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
+- Backend: Python 3.11+, FastAPI, SQLAlchemy (async)
+- Database: PostgreSQL with asyncpg driver
+- Data Processing: Pandas
+- Frontend: React.js with modern UI components
+- API Documentation: Auto-generated OpenAPI/Swagger docs
 
-- Python 3.11+
-- FastAPI
-- SQLAlchemy
-- PostgreSQL
-- Pandas
 ---
 
 ## 📦 Installation
 
+### Prerequisites
+
+- Python 3.11 or higher
+- PostgreSQL database
+- Node.js and npm (for frontend)
+- 
+### Setup Instructions
+1. Clone the repository
 ```bash
 git clone https://github.com/Bothaina-Karakrah/fraud-detection-engine.git
 cd fraud-detection-engine
+```
+2. Create and activate virtual environment
+```bash
 python -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
+```
+3. Install Python dependencies
+```bash
 pip install -r requirements.txt
 ```
-
+4. Install frontend dependencies
+```bash
+cd dashboard
+npm install
+cd ..
+```
 ---
 
 ## 🗃️ Environment Configuration
@@ -40,38 +58,49 @@ pip install -r requirements.txt
 Create a `.env` file in the root:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://<user>:<password>@localhost/<dbname>
+# Database Configuration
+DATABASE_URL=postgresql+asyncpg://username:password@localhost:5432/fraud_detection
+
+# API Configuration
+API_HOST=localhost
+API_PORT=8000
+DEBUG=True
+
+# Security (optional)
+SECRET_KEY=your-secret-key-here
 ```
 
 You can use `init_db.py` and `insert_sample_data.py` to set up tables and generate fake data.
 
 ---
 
-## 🚦 Usage
-
-### Run the API server:
-
+## 🚀 Getting Started
+1. Database Setup
 ```bash
-uvicorn main:app --reload
+# Create database tables
+python init_db.py
+
+# Generate sample transaction data
+python insert_sample_data.py
 ```
-
-### Run the FrontEnd:
+2. Start the Backend Server
 ```bash
-# Navigate to frontend directory (e.g. dashboard)
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+The API will be available at http://localhost:8000
+API documentation: http://localhost:8000/docs
+
+3. Start the Frontend Dashboard
+```bash
 cd dashboard
-
-# Install dependencies
-npm install
-
-# Start the development server
-npm run dev  # or npm start if you're using CRA
+npm run dev
 ```
 
 ![img.png](img.png)
 
 ---
 
-## 📊 Other Endpoints
+## 📊 API Endpoints
 
 - `GET /api/stats` – Overview of total transactions, frauds, fraud rate
 - `GET /api/alerts/recent` – Recent triggered alerts
