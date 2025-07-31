@@ -14,14 +14,13 @@ from faker import Faker
 FRAUD_TYPES = ['high_amount', 'velocity', 'unusual_time', 'location']
 FRAUD_PROBABILITY = 0.05
 CURRENCY = 'USD'
-HOURS_PROB_DISTRIBUTION = [
+HOURS_PROB_DISTRIBUTION = np.array([
     0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.03, 0.05,
     0.08, 0.10, 0.12, 0.15, 0.12, 0.10, 0.08, 0.05,
     0.03, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01
-]
-HOURS_PROB_DISTRIBUTION = np.array(HOURS_PROB_DISTRIBUTION)
+])
 HOURS_PROB_DISTRIBUTION = HOURS_PROB_DISTRIBUTION / HOURS_PROB_DISTRIBUTION.sum()
-print(sum(HOURS_PROB_DISTRIBUTION))  # Should be 1.0
+# print(sum(HOURS_PROB_DISTRIBUTION))  # Should be 1.0
 
 class TransactionGenerator:
     def __init__(self):
