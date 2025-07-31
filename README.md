@@ -117,6 +117,6 @@ npm run dev
 
 ## 👤 Author
 
-Bothaina Karakrah – [LinkedIn]([https://github.com/Bothaina-Karakrah](https://www.linkedin.com/in/bothaina-karakrah-57458219a/))
+Bothaina Karakrah – [LinkedIn](https://www.linkedin.com/in/bothaina-karakrah-57458219a/)
 
 License: MIT
