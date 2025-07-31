@@ -5,8 +5,7 @@ then "dt"
 """
 import asyncio
 import asyncpg
-
-DATABASE_URL = "postgresql://bothainakarakrah@localhost/fraud_db"
+from config import DATABASE_URL
 
 async def create_tables():
     conn = await asyncpg.connect(DATABASE_URL)
