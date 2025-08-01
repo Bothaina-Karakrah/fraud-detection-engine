@@ -9,7 +9,7 @@ import logging
 import asyncio
 
 from pydantic import BaseModel
-DATABASE_URL = "postgresql://bothainakarakrah@localhost/fraud_db"
+from config import DATABASE_URL
 # Configure logging - see info/errors in the terminal during API usage.
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
